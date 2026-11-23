@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>КТО ТУТ КРИНЖ?</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { --bg:#101014; --lime:#C6FF39; --violet:#9747FF; --pink:#FF4FA3; --muted:#8b8b99; --card:#1c1c24; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: var(--bg); color: #fff; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
+  body { min-height: 100vh; padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px); }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .logo { font-weight: 900; font-size: 15px; letter-spacing: .5px; color: var(--lime); }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--violet); display: grid; place-items: center; font-weight: 800; flex: none; }
+  h1 { font-size: 34px; line-height: 1.05; font-weight: 900; margin: 32px 0 12px; text-transform: uppercase; overflow-wrap: anywhere; }
+  h1 span { color: var(--pink); }
+  h2 { font-size: 13px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin: 24px 0 10px; }
+  .sub { color: var(--muted); font-size: 16px; margin-bottom: 24px; }
+  .btn { display: block; width: 100%; padding: 18px; margin-bottom: 12px; border: 0; border-radius: 18px; font-size: 17px; font-weight: 900; text-transform: uppercase; cursor: pointer; transition: transform .1s; font-family: inherit; }
+  .btn:active { transform: scale(.97); }
+  .btn[disabled] { opacity: .35; }
+  .primary { background: var(--lime); color: #101014; }
+  .secondary { background: var(--violet); color: #fff; }
+  .ghost { background: var(--card); color: #fff; border: 2px solid #2a2a36; }
+  .card { background: var(--card); border-radius: 18px; padding: 16px; margin-top: 16px; color: var(--muted); font-size: 14px; }
+  .card b { color: #fff; }
+  .state { text-align: center; margin-top: 30vh; color: var(--muted); }
+  .code { font-size: 44px; font-weight: 900; letter-spacing: 6px; color: var(--lime); text-align: center; margin: 8px 0 4px; }
+  .players { display: grid; gap: 8px; }
+  .player { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 14px; padding: 10px 14px; }
+  .player .avatar { width: 34px; height: 34px; font-size: 14px; }
+  .player .name { flex: 1; font-weight: 700; overflow-wrap: anywhere; }
+  .badge { font-size: 11px; font-weight: 900; color: #101014; background: var(--pink); border-radius: 8px; padding: 3px 8px; text-transform: uppercase; }
+  .chip { display: inline-block; background: var(--violet); border-radius: 10px; padding: 6px 12px; font-size: 13px; font-weight: 800; text-transform: uppercase; }
+  .round { color: var(--muted); font-weight: 800; margin-top: 28px; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 1px; font-size: 13px; }
+  .question { font-size: 30px; line-height: 1.15; font-weight: 900; margin: 20px 0 32px; overflow-wrap: anywhere; }
+  .hint { color: var(--muted); text-align: center; font-size: 14px; margin: 8px 0 16px; }
+  input.field { width: 100%; padding: 18px; border-radius: 18px; border: 2px solid #2a2a36; background: var(--card); color: #fff; font-size: 28px; font-weight: 900; letter-spacing: 6px; text-align: center; text-transform: uppercase; margin-bottom: 12px; font-family: inherit; outline: none; }
+  input.field:focus { border-color: var(--lime); }
+</style>
+</head>
+<body>
+<div id="app"><div class="state">Загружаем компромат…</div></div>
+
+<script>
+  var tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    if (tg.setHeaderColor) tg.setHeaderColor('#101014');
+    if (tg.setBackgroundColor) tg.setBackgroundColor('#101014');
+  }
+
+  var app = document.getElementById('app');
+  var me = null;
+  var pollTimer = null;
+  var currentCode = null;
+  var lastKey = '';
+  var busy = false;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function btn(text, cls, handler) {
+    var b = el('button', 'btn ' + cls, text);
+    b.onclick = function () {
+      if (busy) return;
+      handler();
+    };
+    return b;
+  }
+
+  function notify(msg) {
+    if (tg && tg.showAlert) tg.showAlert(msg); else alert(msg);
+  }
+
+  function api(method, path, body) {
+    var opts = {
+      method: method,
+      headers: { 'X-Init-Data': (tg && tg.initData) || '', 'Content-Type': 'application/json' }
+    };
+    if (body) opts.body = JSON.stringify(body);
+    return fetch(path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) {
+          var err = new Error(data.detail || ('Ошибка ' + r.status));
+          err.status = r.status;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  function run(promise, onOk) {
+    busy = true;
+    return promise.then(function (data) { busy = false; onOk(data); })
+      .catch(function (e) { busy = false; notify(e.message || 'Что-то пошло не так'); });
+  }
+
+  function header() {
+    var top = el('div', 'top');
+    top.appendChild(el('div', 'logo', 'КТО ТУТ КРИНЖ?'));
+    top.appendChild(el('div', 'avatar', (me.display_name || '?').charAt(0).toUpperCase()));
+    return top;
+  }
+
+  function stopPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+    currentCode = null;
+    lastKey = '';
+  }
+
+  /* ---------- главный экран ---------- */
+  function renderHome() {
+    stopPolling();
+    app.replaceChildren();
+    app.appendChild(header());
+
+    var h1 = el('h1');
+    h1.appendChild(document.createTextNode('Твоя компания готова узнать '));
+    h1.appendChild(el('span', '', 'правду?'));
+    app.appendChild(h1);
+    app.appendChild(el('p', 'sub', 'Проверь, кто из вас самый подозрительный персонаж'));
+
+    app.appendChild(btn('Создать игру', 'primary', function () { createRoom(8); }));
+    app.appendChild(btn('Присоединиться', 'secondary', renderJoin));
+    app.appendChild(btn('Быстрая игра', 'ghost', function () { createRoom(5); }));
+
+    var card = el('div', 'card');
+    card.appendChild(el('b', '', me.display_name));
+    card.appendChild(document.createTextNode(' · игр: ' + me.games_played + ' · приглашено: ' + me.invited_count));
+    app.appendChild(card);
+  }
+
+  function createRoom(rounds) {
+    run(api('POST', '/api/rooms', { rounds: rounds }), function (state) { enterRoom(state); });
+  }
+
+  /* ---------- ввод кода ---------- */
+  function renderJoin() {
+    stopPolling();
+    app.replaceChildren();
+    app.appendChild(header());
+    app.appendChild(el('h1', '', 'Код комнаты'));
+    app.appendChild(el('p', 'sub', 'Попроси код у ведущего или открой его ссылку-приглашение'));
+
+    var input = el('input', 'field');
+    input.maxLength = 6;
+    input.placeholder = 'ABC123';
+    input.autocapitalize = 'characters';
+    input.autocomplete = 'off';
+    app.appendChild(input);
+
+    app.appendChild(btn('Зайти', 'primary', function () {
+      var code = input.value.trim().toUpperCase();
+      if (code.length !== 6) { notify('Код состоит из 6 символов'); return; }
+      joinRoom(code);
+    }));
+    app.appendChild(btn('Назад', 'ghost', renderHome));
+  }
+
+  function joinRoom(code) {
+    run(api('POST', '/api/rooms/join', { code: code }), function (state) { enterRoom(state); });
+  }
+
+  /* ---------- комната ---------- */
+  function enterRoom(state) {
+    stopPolling();
+    currentCode = state.code;
+    lastKey = '';
+    renderRoom(state);
+    pollTimer = setInterval(poll, 2000);
+  }
+
+  function poll() {
+    if (!currentCode || busy) return;
+    var code = currentCode;
+    api('GET', '/api/rooms/' + code).then(function (state) {
+      if (code !== currentCode) return;
+      renderRoom(state);
+    }).catch(function (e) {
+      if (e.status === 403 || e.status === 404) {
+        notify(e.message);
+        renderHome();
+      }
+    });
+  }
+
+  function renderRoom(state) {
+    var key = JSON.stringify(state);
+    if (key === lastKey) return;
+    lastKey = key;
+
+    app.replaceChildren();
+    app.appendChild(header());
+    var isHost = state.host_id === me.id;
+
+    if (state.status === 'lobby') renderLobby(state, isHost);
+    else if (state.status === 'playing') renderGame(state, isHost);
+    else renderFinished(state);
+  }
+
+  function renderLobby(state, isHost) {
+    app.appendChild(el('h2', '', 'Код комнаты'));
+    app.appendChild(el('div', 'code', state.code));
+    app.appendChild(el('p', 'hint', 'Игроков: ' + state.players.length + ' из ' + state.max_players));
+
+    var list = el('div', 'players');
+    state.players.forEach(function (p) {
+      var row = el('div', 'player');
+      row.appendChild(el('div', 'avatar', (p.name || '?').charAt(0).toUpperCase()));
+      row.appendChild(el('div', 'name', p.name));
+      if (p.is_host) row.appendChild(el('span', 'badge', 'ведущий'));
+      list.appendChild(row);
+    });
+    app.appendChild(list);
+
+    var actions = el('div');
+    actions.style.marginTop = '24px';
+
+    actions.appendChild(btn('Позвать друзей', 'secondary', function () {
+      var url = 'https://t.me/share/url?url=' + encodeURIComponent(state.invite_link) +
+        '&text=' + encodeURIComponent('Го играть в «КТО ТУТ КРИНЖ?» — заходи в комнату ' + state.code);
+      if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, '_blank');
+    }));
+
+    if (isHost) {
+      var enough = state.players.length >= state.min_players;
+      var start = btn('Начать игру', 'primary', function () {
+        run(api('POST', '/api/rooms/' + state.code + '/start'), renderRoom);
+      });
+      if (!enough) {
+        start.disabled = true;
+        actions.appendChild(el('p', 'hint', 'Для старта нужно минимум ' + state.min_players + ' игрока'));
+      }
+      actions.appendChild(start);
+    } else {
+      actions.appendChild(el('p', 'hint', 'Ждём, пока ведущий начнёт игру…'));
+    }
+
+    actions.appendChild(btn('Выйти', 'ghost', function () {
+      var code = state.code;
+      stopPolling();
+      api('POST', '/api/rooms/' + code + '/leave').catch(function () {}).then(renderHome);
+    }));
+    app.appendChild(actions);
+  }
+
+  function renderGame(state, isHost) {
+    app.appendChild(el('div', 'round', 'Раунд ' + state.round + ' из ' + state.rounds_total));
+    if (state.question) {
+      app.appendChild(el('span', 'chip', state.question.category));
+      app.appendChild(el('div', 'question', state.question.text));
+    }
+    if (isHost) {
+      var last = state.round >= state.rounds_total;
+      app.appendChild(btn(last ? 'Завершить' : 'Дальше', 'primary', function () {
+        run(api('POST', '/api/rooms/' + state.code + '/next'), renderRoom);
+      }));
+    } else {
+      app.appendChild(el('p', 'hint', 'Ведущий листает вопросы…'));
+    }
+    app.appendChild(el('p', 'hint', 'Голосование появится в следующем обновлении'));
+  }
+
+  function renderFinished(state) {
+    app.appendChild(el('h1', '', 'Игра окончена'));
+    app.appendChild(el('p', 'sub', 'Вопросов пройдено: ' + state.rounds_total + '. Голосование и итоговые титулы — на следующем этапе.'));
+    app.appendChild(btn('На главную', 'primary', renderHome));
+  }
+
+  /* ---------- старт ---------- */
+  function start() {
+    api('GET', '/api/me').then(function (data) {
+      me = data;
+      var params = new URLSearchParams(window.location.search);
+      var code = (params.get('room') || '').toUpperCase();
+      if (code) {
+        history.replaceState(null, '', window.location.pathname);
+        renderHome();
+        joinRoom(code);
+      } else {
+        renderHome();
+      }
+    }).catch(function (e) {
+      app.replaceChildren(el('div', 'state', e.message || 'Открой игру через Telegram-бота.'));
+    });
+  }
+
+  start();
+</script>
+</body>
+</html>
